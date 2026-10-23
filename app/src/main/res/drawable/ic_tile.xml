@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome motif of the launcher icon, for the tile and the notification. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="176"
+    android:viewportHeight="176">
+    <group
+        android:translateX="-40"
+        android:translateY="-40">
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M110,50h36a18,18 0,0 1,18 18v120a18,18 0,0 1,-18 18h-36a18,18 0,0 1,-18 -18v-120a18,18 0,0 1,18 -18zM108,88a20,20 0,1 0,40 0a20,20 0,1 0,-40 0z" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="14"
+            android:strokeLineCap="round"
+            android:pathData="M66,92Q48,128 66,164M190,92Q208,128 190,164" />
+    </group>
+</vector>
