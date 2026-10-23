@@ -1,9 +1,12 @@
 package com.shake2flashlight
 
+import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import androidx.annotation.RequiresApi
 
 /** Quick-settings tile that turns the chop-chop service on and off. */
+@RequiresApi(Build.VERSION_CODES.N)
 class ChopTileService : TileService() {
 
     override fun onStartListening() = render(ChopService.running)

@@ -17,12 +17,16 @@ import android.hardware.SensorManager
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
+import android.os.Vibrator
 import android.os.VibratorManager
 import android.service.quicksettings.TileService
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPreferenceChangeListener {
 
@@ -32,6 +36,7 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
 
         /** Also called by the settings screen, so the channel exists before the service ever ran. */
         fun ensureChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "Gesto chop-chop", NotificationManager.IMPORTANCE_LOW)
             )
@@ -43,7 +48,7 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
         fun setEnabled(context: Context, on: Boolean) {
             Prefs.get(context).edit().putBoolean(Prefs.ENABLED, on).apply()
             val intent = Intent(context, ChopService::class.java)
-            if (on) context.startForegroundService(intent) else context.stopService(intent)
+            if (on) ContextCompat.startForegroundService(context, intent) else context.stopService(intent)
         }
     }
 
@@ -52,6 +57,7 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
     private lateinit var camera: CameraManager
     private lateinit var wakeLock: PowerManager.WakeLock
     private var detector = ChopDetector()
+    private var gravity: FloatArray? = null // set only when falling back to the raw accelerometer
     private var proximity: Sensor? = null
     private var covered = false
     private var cameraId: String? = null
@@ -85,15 +91,16 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
         wakeLock.acquire()
 
         sensors = getSystemService(SensorManager::class.java)
-        sensors.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)?.let {
-            sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-        }
+        // Linear acceleration is a fused sensor that needs a gyroscope; budget phones only have the accelerometer.
+        val motion = sensors.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+            ?: sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.also { gravity = FloatArray(3) }
+        motion?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
         proximity = sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY)
         applySettings()
         prefs.registerOnSharedPreferenceChangeListener(this)
 
         running = true
-        TileService.requestListeningState(this, ComponentName(this, ChopTileService::class.java))
+        refreshTile()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -102,7 +109,11 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
             stopSelf()
             return START_NOT_STICKY
         }
-        startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(1, notification())
+        }
         return START_STICKY
     }
 
@@ -113,8 +124,13 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
         sensors.unregisterListener(this)
         camera.unregisterTorchCallback(torchCallback)
         if (wakeLock.isHeld) wakeLock.release()
-        TileService.requestListeningState(this, ComponentName(this, ChopTileService::class.java))
+        refreshTile()
         super.onDestroy()
+    }
+
+    private fun refreshTile() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        TileService.requestListeningState(this, ComponentName(this, ChopTileService::class.java))
     }
 
     override fun onSharedPreferenceChanged(p: SharedPreferences?, key: String?) {
@@ -137,14 +153,33 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
             covered = e.values[0] < e.sensor.maximumRange
             return
         }
-        if (!detector.onSample(e.timestamp, e.values[0], e.values[1], e.values[2])) return
+        var (x, y, z) = e.values
+        gravity?.let { g ->
+            // Low-pass filter isolates gravity; subtracting it leaves the linear acceleration (Android sensor docs formula).
+            g[0] = 0.8f * g[0] + 0.2f * x; g[1] = 0.8f * g[1] + 0.2f * y; g[2] = 0.8f * g[2] + 0.2f * z
+            x -= g[0]; y -= g[1]; z -= g[2]
+        }
+        if (!detector.onSample(e.timestamp, x, y, z)) return
         android.util.Log.d("CHOP", "fire torchOn=$torchOn covered=$covered")
         if (covered) return
-        if (prefs.getBoolean(Prefs.VIBRATE, true)) {
-            getSystemService(VibratorManager::class.java).defaultVibrator
-                .vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
-        }
+        if (prefs.getBoolean(Prefs.VIBRATE, true)) vibrate()
         setTorch(!torchOn)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun vibrate() {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getSystemService(VibratorManager::class.java).defaultVibrator
+        } else {
+            getSystemService(Vibrator::class.java)
+        }
+        when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
+                vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+            else -> vibrator.vibrate(40)
+        }
     }
 
     private fun setTorch(on: Boolean) {
@@ -169,13 +204,14 @@ class ChopService : Service(), SensorEventListener, SharedPreferences.OnSharedPr
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
-        return Notification.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tile)
             .setContentTitle("Chop-chop ativo")
             .setContentText("Faça o movimento para ligar/desligar a lanterna")
             .setContentIntent(open)
-            .addAction(Notification.Action.Builder(null, "Parar", stop).build())
+            .addAction(0, "Parar", stop)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 }

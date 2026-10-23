@@ -7,12 +7,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -57,8 +57,10 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
@@ -70,10 +72,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 
 class MainActivity : ComponentActivity() {
 
@@ -97,7 +101,20 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ChopTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val colors = if (isSystemInDarkTheme()) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    val dark = isSystemInDarkTheme()
+    // Wallpaper colours exist from Android 12; older versions get the icon's navy/yellow palette.
+    val colors = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        dark -> darkColorScheme(
+            primary = Color(0xFFFACC15), onPrimary = Color(0xFF3A3000),
+            primaryContainer = Color(0xFF1E3A8A), onPrimaryContainer = Color(0xFFDCE4FF)
+        )
+        else -> lightColorScheme(
+            primary = Color(0xFF1E3A8A), onPrimary = Color.White,
+            primaryContainer = Color(0xFFDCE4FF), onPrimaryContainer = Color(0xFF0F172A)
+        )
+    }
     MaterialTheme(colorScheme = colors, content = content)
 }
 
@@ -181,12 +198,12 @@ private fun HomeScreen(resumeTick: Int) {
         }
     }
 
-    TorchCard()
+    if (!TorchCard()) {
+        WarningCard("Aparelho sem flash", "O gesto é reconhecido, mas não há lanterna para acender neste aparelho.")
+    }
 
     // Warnings re-evaluated on every resume (resumeTick) so they disappear once fixed.
-    val notificationsOk = remember(resumeTick) {
-        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    }
+    val notificationsOk = remember(resumeTick) { NotificationManagerCompat.from(context).areNotificationsEnabled() }
     val batteryOk = remember(resumeTick) {
         context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
     }
@@ -195,7 +212,7 @@ private fun HomeScreen(resumeTick: Int) {
     if (!batteryOk) {
         WarningCard(
             "Otimização de bateria ativa",
-            "A One UI pode encerrar o gesto em segundo plano. Libere o app para funcionar sempre.",
+            "O sistema pode encerrar o gesto em segundo plano. Libere o app para funcionar sempre.",
             "Liberar"
         ) {
             context.startActivity(
@@ -208,19 +225,29 @@ private fun HomeScreen(resumeTick: Int) {
             "Notificações bloqueadas",
             "Sem elas, a notificação com o botão Parar fica escondida.",
             "Permitir"
-        ) { askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        ) {
+            // The runtime permission exists from Android 13; before that the user turns notifications on in app settings.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                context.startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                )
+            }
+        }
     }
 }
 
+/** Returns false when the device has no flash (the card is not shown). */
 @Composable
-private fun TorchCard() {
+private fun TorchCard(): Boolean {
     val context = LocalContext.current
     val camera = remember { context.getSystemService(CameraManager::class.java) }
     val cameraId = remember {
         camera.cameraIdList.firstOrNull {
             camera.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
         }
-    } ?: return
+    } ?: return false
     var torchOn by remember { mutableStateOf(false) }
     DisposableEffect(camera) {
         val callback = object : CameraManager.TorchCallback() {
@@ -246,10 +273,11 @@ private fun TorchCard() {
             }) { Text(if (torchOn) "Apagar" else "Acender") }
         }
     }
+    return true
 }
 
 @Composable
-private fun WarningCard(title: String, text: String, action: String, onClick: () -> Unit) {
+private fun WarningCard(title: String, text: String, action: String? = null, onClick: () -> Unit = {}) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
         modifier = Modifier.fillMaxWidth()
@@ -260,7 +288,11 @@ private fun WarningCard(title: String, text: String, action: String, onClick: ()
                 Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp))
             }
             Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp, end = 12.dp))
-            TextButton(onClick = onClick, modifier = Modifier.align(Alignment.End)) { Text(action) }
+            if (action != null) {
+                TextButton(onClick = onClick, modifier = Modifier.align(Alignment.End)) { Text(action) }
+            } else {
+                Spacer(Modifier.height(12.dp))
+            }
         }
     }
 }
@@ -314,7 +346,18 @@ private fun SettingsScreen(resumeTick: Int) {
             prefs.edit().putBoolean(Prefs.START_ON_BOOT, it).apply()
         }
         // Android requires the foreground-service notification; only the user can hide its channel in system settings.
-        val notificationShown = remember(resumeTick) {
+        // Channels exist from Android 8; before that there is nothing to toggle.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) NotificationSetting(resumeTick)
+        TileSetting()
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+@androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
+private fun NotificationSetting(resumeTick: Int) {
+    val context = LocalContext.current
+    val notificationShown = remember(resumeTick) {
             ChopService.ensureChannel(context)
             context.getSystemService(NotificationManager::class.java)
                 .getNotificationChannel(ChopService.CHANNEL_ID).importance != NotificationManager.IMPORTANCE_NONE
@@ -331,18 +374,30 @@ private fun SettingsScreen(resumeTick: Int) {
                     .putExtra(Settings.EXTRA_CHANNEL_ID, ChopService.CHANNEL_ID)
             )
         }
-        ListItem(
-            headlineContent = { Text("Botão no painel rápido") },
-            supportingContent = { Text("Liga e desliga o gesto sem abrir o app.") },
-            trailingContent = {
-                OutlinedButton(onClick = { requestTile(context) }) { Text("Adicionar") }
-            },
-            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-        )
-    }
-    Spacer(Modifier.height(8.dp))
 }
 
+/** Tiles exist from Android 7; the "add" prompt from Android 13, before that the user adds it by editing the panel. */
+@Composable
+private fun TileSetting() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+    val context = LocalContext.current
+    val canRequest = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    ListItem(
+        headlineContent = { Text("Botão no painel rápido") },
+        supportingContent = {
+            Text(
+                if (canRequest) "Liga e desliga o gesto sem abrir o app."
+                else "Edite o painel rápido e arraste o botão \"Chop-chop\" para ele."
+            )
+        },
+        trailingContent = {
+            if (canRequest) OutlinedButton(onClick = { requestTile(context) }) { Text("Adicionar") }
+        },
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+    )
+}
+
+@androidx.annotation.RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private fun requestTile(context: Context) {
     context.getSystemService(StatusBarManager::class.java).requestAddTileService(
         ComponentName(context, ChopTileService::class.java),

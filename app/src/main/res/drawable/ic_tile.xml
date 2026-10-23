@@ -10,7 +10,6 @@
         android:translateY="-40">
         <path
             android:fillColor="#FFFFFF"
-            android:fillType="evenOdd"
             android:pathData="M110,50h36a18,18 0,0 1,18 18v120a18,18 0,0 1,-18 18h-36a18,18 0,0 1,-18 -18v-120a18,18 0,0 1,18 -18zM108,88a20,20 0,1 0,40 0a20,20 0,1 0,-40 0z" />
         <path
             android:strokeColor="#FFFFFF"
