@@ -20,7 +20,7 @@
 | **Versão** | 1.2 (`versionCode` 3) |
 | **Estado** | Funcional e em uso diário no aparelho de destino; partes das configurações ainda não testadas no aparelho (ver [critérios](#8-critérios-de-aceite)) |
 | **Contexto** | Projeto pessoal: recuperar uma função de que eu sentia falta ao trocar de Motorola para Samsung |
-| **Alvo** | Qualquer celular com Android 6.0 ou mais novo (testado de verdade num Galaxy S23 Ultra e em emuladores); instalado fora da Play Store |
+| **Alvo** | Qualquer celular com Android 6.0 ou mais novo (testado de verdade num Galaxy S23 Ultra, num Galaxy A32 e em emuladores); instalado fora da Play Store |
 
 > **Limite principal:** o gesto foi calibrado com **uma única gravação** de movimento, num único aparelho. Em outro celular, ou com outro jeito de chacoalhar, pode disparar sem querer ou não disparar. Ajuste a sensibilidade nas configurações. O app mantém a CPU acordada enquanto o gesto está ativo, o que tem custo de bateria.
 
@@ -210,7 +210,7 @@ São 8 testes unitários do `ChopDetector`:
 - dois gestos separados por uma pausa disparam duas vezes;
 - **a gravação real do aparelho**, que dispara uma vez por rajada (6 vezes).
 
-Serviço, interface e sensores foram testados à mão no S23 Ultra e em emuladores do Android Studio (Android 6.0, 8.0 e 17), sem testes automatizados. No emulador, a chacoalhada é simulada injetando valores no acelerômetro:
+Serviço, interface e sensores foram testados à mão no S23 Ultra, no A32 e em emuladores do Android Studio (Android 6.0, 8.0 e 17), sem testes automatizados. No emulador, a chacoalhada é simulada injetando valores no acelerômetro:
 
 ```bash
 adb -e emu sensor set acceleration 45:9.8:0
@@ -222,6 +222,8 @@ Alterne os dois comandos algumas vezes. Os emuladores antigos (API 23 e 26) leem
 ## 8. Critérios de aceite
 
 - [x] O gesto acende e apaga a lanterna com a tela ligada.
+- [x] O gesto funciona num segundo aparelho físico (Galaxy A32).
+- [ ] Instalar o APK da release sem bloqueio da Play Store: no A32, a proteção bloqueou o APK assinado com a chave de depuração (plano na [versão 1.3](docs/plano-v1.3.md)).
 - [x] O gesto funciona com a tela bloqueada.
 - [x] O gesto alterna certo depois que a lanterna é mudada pelo painel do sistema.
 - [x] Os testes unitários passam, incluindo a gravação real.
@@ -246,6 +248,8 @@ Alterne os dois comandos algumas vezes. Os emuladores antigos (API 23 e 26) leem
 **Dentro:** gesto, lanterna, configurações do gesto, serviço em primeiro plano, painel rápido, início no boot.
 
 **Fora:** publicação na Play Store, Android anterior ao 6.0 (não tem a API de lanterna), controle de intensidade, estroboscópio, testes instrumentados.
+
+**Próxima versão:** assinatura de release, Play Protect e verificação de desenvolvedor, detalhados em [docs/plano-v1.3.md](docs/plano-v1.3.md).
 
 **Evoluções possíveis:** calibração guiada no próprio app (gravar o gesto do usuário e ajustar os limites); detecção em lote no sensor hub para gastar menos bateria; testes de interface com Compose.
 
